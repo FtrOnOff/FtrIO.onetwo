@@ -2,6 +2,8 @@
 
 A .NET CLI tool that scans a project directory for [FtrIO](https://github.com/TheScottBot/FtrIO) feature toggle usage and reports the current state of every toggle.
 
+Because FtrIO always resolves toggle state from `appsettings.json` at runtime, FtrIO.OneTwo gives you an instant at-a-glance view of exactly what is enabled or disabled in your codebase right now — and precisely where each toggle is used — without having to open a single source file or config manually.
+
 ## What it does
 
 FtrIO.OneTwo walks a project's source tree, finds every toggle reference, cross-references it against `appsettings.json`, and outputs a table showing whether each toggle is **ON**, **OFF**, or **MISSING** from configuration.
