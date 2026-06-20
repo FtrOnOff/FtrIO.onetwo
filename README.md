@@ -52,23 +52,27 @@ dotnet tool install -g FtrIO.OneTwo --add-source ./FtrIO.OneTwo/nupkg
 ## Usage
 
 ```
-ftrio-onetwo [path] [--markdown <output.md>]
+ftrio-onetwo [path] [--env <name>] [--markdown <output.md>]
 ```
 
 | Argument | Description |
 |---|---|
 | `path` | Path to the project or solution directory to scan. Defaults to the current directory. |
+| `--env <name>` | Override the active environment. Reads `appsettings.<name>.json` as an overlay on top of the base config. |
 | `--markdown <file>` | Also write the results to a markdown file at the given path. |
 | `--help` / `-h` | Show usage. |
 
 **Examples:**
 
 ```bash
-# Scan a project and print a table to the console
+# Scan a project — environment auto-detected from FtrIO:Environment in appsettings.json
 ftrio-onetwo C:\Projects\MyApp
 
+# Explicitly scan against the Staging overlay
+ftrio-onetwo C:\Projects\MyApp --env Staging
+
 # Also emit a markdown report
-ftrio-onetwo C:\Projects\MyApp --markdown toggles.md
+ftrio-onetwo C:\Projects\MyApp --env Production --markdown toggles.md
 
 # Scan the current directory
 ftrio-onetwo
@@ -76,19 +80,56 @@ ftrio-onetwo
 
 ## Example output
 
+Without `--env`, each `appsettings*.json` file found is shown as a separate table:
+
 ```
 Scanning C:\Projects\MyApp...
+
+── Development C:\Projects\MyApp\appsettings.Development.json
+╭──────────────────┬──────────────────┬──────────┬───────┬───────────────────┬──────╮
+│ Toggle Key       │ Method           │ Source   │ State │ File              │ Line │
+├──────────────────┼──────────────────┼──────────┼───────┼───────────────────┼──────┤
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle] │  80%  │ Services\Order.cs │    9 │
+│ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle] │  ON   │ Services\Email.cs │   22 │
+╰──────────────────┴──────────────────┴──────────┴───────┴───────────────────┴──────╯
+2 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 0 BLUE/GREEN, 0 MISSING.
+
+── appsettings.json C:\Projects\MyApp\appsettings.json
+╭──────────────────┬──────────────────┬──────────┬─────────┬───────────────────┬──────╮
+│ Toggle Key       │ Method           │ Source   │  State  │ File              │ Line │
+├──────────────────┼──────────────────┼──────────┼─────────┼───────────────────┼──────┤
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle] │   OFF   │ Services\Order.cs │    9 │
+│ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle] │   ON    │ Services\Email.cs │   22 │
+╰──────────────────┴──────────────────┴──────────┴─────────┴───────────────────┴──────╯
+2 toggle(s). 1 ON, 1 OFF, 0 PERCENTAGE, 0 BLUE/GREEN, 0 MISSING.
+
+── Staging C:\Projects\MyApp\appsettings.Staging.json
 ╭──────────────────┬──────────────────┬────────────┬─────────┬───────────────────┬──────╮
 │ Toggle Key       │ Method           │ Source     │  State  │ File              │ Line │
 ├──────────────────┼──────────────────┼────────────┼─────────┼───────────────────┼──────┤
-│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle]   │   20%   │ Services\Order.cs │    9 │
-│ OldCheckoutFlow  │ OldCheckoutFlow  │ [Toggle]   │   OFF   │ Services\Order.cs │   14 │
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle]   │   50%   │ Services\Order.cs │    9 │
 │ PaymentV2        │ PaymentV2        │ [Toggle]   │  BLUE   │ Services\Pay.cs   │    6 │
 │ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle]   │   ON    │ Services\Email.cs │   22 │
 │ UnknownFeature   │ UnknownFeature   │ ManualCall │ MISSING │ Controllers\Ho... │   42 │
 ╰──────────────────┴──────────────────┴────────────┴─────────┴───────────────────┴──────╯
+4 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 1 BLUE/GREEN, 1 MISSING.
+```
 
-5 toggle(s) found. 1 ON, 1 OFF, 1 PERCENTAGE, 1 BLUE/GREEN, 1 MISSING from appsettings.
+With `--env`, a single table is shown for that environment alongside its file path:
+
+```
+Scanning C:\Projects\MyApp...
+
+── Staging C:\Projects\MyApp\appsettings.Staging.json
+╭──────────────────┬──────────────────┬────────────┬─────────┬───────────────────┬──────╮
+│ Toggle Key       │ Method           │ Source     │  State  │ File              │ Line │
+├──────────────────┼──────────────────┼────────────┼─────────┼───────────────────┼──────┤
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle]   │   50%   │ Services\Order.cs │    9 │
+│ PaymentV2        │ PaymentV2        │ [Toggle]   │  BLUE   │ Services\Pay.cs   │    6 │
+│ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle]   │   ON    │ Services\Email.cs │   22 │
+│ UnknownFeature   │ UnknownFeature   │ ManualCall │ MISSING │ Controllers\Ho... │   42 │
+╰──────────────────┴──────────────────┴────────────┴─────────┴───────────────────┴──────╯
+4 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 1 BLUE/GREEN, 1 MISSING.
 ```
 
 ## States
@@ -101,22 +142,44 @@ Scanning C:\Projects\MyApp...
 | `BLUE` / `GREEN` | Blue-green deployment slot — shown in uppercase |
 | `MISSING` | Toggle key is used in code but has no entry in any `appsettings*.json` file |
 
-## How toggle state is resolved
+## Multi-environment support
 
-The tool searches for all `appsettings*.json` files under the scanned directory and reads the `Toggles` section. FtrIO supports boolean, percentage, and blue-green values in the same config file:
+### All environments (default)
+
+When no `--env` flag is given, FtrIO.OneTwo finds every `appsettings*.json` in the project tree and renders a separate table for each one. The environment name is derived from the filename — `appsettings.Staging.json` becomes `Staging`, and the base `appsettings.json` is shown verbatim. Each table header includes the full path to the file it was read from so there is never any ambiguity about which config is being shown.
+
+Duplicate environment names are deduplicated — if the same name appears in both the source directory and `bin/`, the first one found wins.
+
+### Targeting a specific environment
+
+Use `--env` to read a single environment. FtrIO.OneTwo applies FtrIO's overlay model: the environment-specific file's values win, and the base `appsettings.json` fills any gaps. The full path to the overlay file is shown in the table header.
+
+```bash
+ftrio-onetwo C:\Projects\MyApp --env Staging
+ftrio-onetwo C:\Projects\MyApp --env Production
+```
 
 ```json
+// appsettings.json — base config
 {
   "Toggles": {
     "SendWelcomeEmail": true,
-    "OldCheckoutFlow": false,
-    "NewCheckoutFlow": "20%",
+    "NewCheckoutFlow": false,
     "PaymentV2": "blue"
+  }
+}
+
+// appsettings.Staging.json — overlay (only differing values needed)
+{
+  "Toggles": {
+    "NewCheckoutFlow": "50%"
   }
 }
 ```
 
-This matches the configuration structure expected by [FtrIO](https://github.com/TheScottBot/FtrIO).
+With this setup, `--env Staging` resolves `NewCheckoutFlow` to `50%` and fills `SendWelcomeEmail` and `PaymentV2` from the base.
+
+> **Note:** FtrIO deliberately ignores `ASPNETCORE_ENVIRONMENT`, and so does this tool. Use `--env` on the command line to target a specific environment.
 
 ## Building from source
 

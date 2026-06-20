@@ -26,9 +26,8 @@ internal static class ToggleScanner
         "ExecuteMethodIfToggleOn"
     };
 
-    internal static IReadOnlyList<ToggleEntry> Scan(
-        string projectRoot,
-        Dictionary<string, string> toggleStates)
+    // Returns entries with State = null; callers apply per-environment state via `with`
+    internal static IReadOnlyList<ToggleEntry> Scan(string projectRoot)
     {
         var entries = new List<ToggleEntry>();
 
@@ -57,10 +56,8 @@ internal static class ToggleScanner
 
                         var line = tree.GetLineSpan(method.Span).StartLinePosition.Line + 1;
                         var key = method.Identifier.Text;
-                        entries.Add(new ToggleEntry(
-                            key, key, relPath, line,
-                            isAsync ? ToggleSource.AsyncAttribute : ToggleSource.Attribute,
-                            toggleStates.TryGetValue(key, out var s) ? s : null));
+                        entries.Add(new ToggleEntry(key, key, relPath, line,
+                            isAsync ? ToggleSource.AsyncAttribute : ToggleSource.Attribute, null));
                     }
                 }
             }
@@ -90,10 +87,8 @@ internal static class ToggleScanner
 
                 var key = keyArg.Token.ValueText;
                 var line = tree.GetLineSpan(invocation.Span).StartLinePosition.Line + 1;
-                entries.Add(new ToggleEntry(
-                    key, methodName, relPath, line,
-                    isAsyncCall ? ToggleSource.AsyncManualCall : ToggleSource.ManualCall,
-                    toggleStates.TryGetValue(key, out var s2) ? s2 : null));
+                entries.Add(new ToggleEntry(key, methodName, relPath, line,
+                    isAsyncCall ? ToggleSource.AsyncManualCall : ToggleSource.ManualCall, null));
             }
         }
 
