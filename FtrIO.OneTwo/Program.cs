@@ -1,10 +1,11 @@
 using FtrIO.OneTwo;
 using Spectre.Console;
 
-// Usage: ftrio-onetwo [path] [--env <name>] [--markdown <output.md>]
+// Usage: ftrio-onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
 string? markdownPath = null;
 string? envOverride = null;
-string scanPath = Directory.GetCurrentDirectory();
+string? sourcePath = null;
+string? configPath = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -12,28 +13,51 @@ for (int i = 0; i < args.Length; i++)
         markdownPath = args[++i];
     else if (args[i] == "--env" && i + 1 < args.Length)
         envOverride = args[++i];
+    else if (args[i] == "--source" && i + 1 < args.Length)
+        sourcePath = args[++i];
+    else if (args[i] == "--config" && i + 1 < args.Length)
+        configPath = args[++i];
     else if (args[i] == "--help" || args[i] == "-h")
     {
-        AnsiConsole.MarkupLine("[bold]ftrio-onetwo[/] [path] [--env <name>] [--markdown <output.md>]");
-        AnsiConsole.MarkupLine("  Scans a project directory for FtrIO [[Toggle]] usage and reports current state.");
+        AnsiConsole.MarkupLine("[bold]ftrio-onetwo[/] [[--source <path>]] [[--config <path>]] [[--env <name>]] [[--markdown <output.md>]]");
+        AnsiConsole.MarkupLine("  Scans source code for FtrIO [[Toggle]] usage and cross-references against appsettings files.");
+        AnsiConsole.MarkupLine("  --source    Directory to scan for toggle usage in .cs files. Defaults to current directory.");
+        AnsiConsole.MarkupLine("  --config    Directory to search for appsettings*.json files. Defaults to --source.");
         AnsiConsole.MarkupLine("  --env       Show a single environment using the base+overlay model (e.g. --env Staging).");
         AnsiConsole.MarkupLine("              Omit to show all appsettings files as separate tables.");
         AnsiConsole.MarkupLine("  --markdown  Write results to a markdown file.");
         return 0;
     }
-    else
-        scanPath = args[i];
+    else if (!args[i].StartsWith("--"))
+    {
+        // Positional argument — first one is source, second is config
+        if (sourcePath is null) sourcePath = args[i];
+        else if (configPath is null) configPath = args[i];
+    }
 }
 
-if (!Directory.Exists(scanPath))
+sourcePath ??= Directory.GetCurrentDirectory();
+configPath ??= sourcePath;
+
+if (!Directory.Exists(sourcePath))
 {
-    AnsiConsole.MarkupLine($"[red]Error:[/] Directory not found: {scanPath}");
+    AnsiConsole.MarkupLine($"[red]Error:[/] Source directory not found: {sourcePath}");
     return 1;
 }
 
-AnsiConsole.MarkupLine($"[grey]Scanning[/] [yellow]{scanPath}[/]...\n");
+if (!Directory.Exists(configPath))
+{
+    AnsiConsole.MarkupLine($"[red]Error:[/] Config directory not found: {configPath}");
+    return 1;
+}
 
-var codeEntries = ToggleScanner.Scan(scanPath);
+var scanLabel = configPath == sourcePath
+    ? $"[yellow]{sourcePath}[/]"
+    : $"[yellow]{sourcePath}[/] [grey](config:[/] [yellow]{configPath}[/][grey])[/]";
+
+AnsiConsole.MarkupLine($"[grey]Scanning[/] {scanLabel}...\n");
+
+var codeEntries = ToggleScanner.Scan(sourcePath);
 
 if (codeEntries.Count == 0)
 {
@@ -45,11 +69,11 @@ if (codeEntries.Count == 0)
 List<EnvironmentResult> environments;
 if (envOverride is not null)
 {
-    environments = [AppSettingsReader.ReadForEnv(scanPath, envOverride)];
+    environments = [AppSettingsReader.ReadForEnv(configPath, envOverride)];
 }
 else
 {
-    var allFiles = AppSettingsReader.ReadAll(scanPath);
+    var allFiles = AppSettingsReader.ReadAll(configPath);
     environments = allFiles.Count > 0
         ? [.. allFiles]
         : [new EnvironmentResult("appsettings.json", "appsettings.json", [])];
@@ -58,7 +82,9 @@ else
 var mdBuilder = markdownPath is not null ? new System.Text.StringBuilder() : null;
 mdBuilder?.AppendLine("# FtrIO Toggle Report");
 mdBuilder?.AppendLine();
-mdBuilder?.AppendLine($"**Project:** `{scanPath}`  ");
+mdBuilder?.AppendLine($"**Source:** `{sourcePath}`  ");
+if (configPath != sourcePath)
+    mdBuilder?.AppendLine($"**Config:** `{configPath}`  ");
 mdBuilder?.AppendLine($"**Generated:** {DateTime.Now:yyyy-MM-dd HH:mm:ss}  ");
 mdBuilder?.AppendLine($"**Environments:** {string.Join(", ", environments.Select(e => e.DisplayName))}");
 mdBuilder?.AppendLine();

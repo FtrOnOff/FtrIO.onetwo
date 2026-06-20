@@ -52,27 +52,36 @@ dotnet tool install -g FtrIO.OneTwo --add-source ./FtrIO.OneTwo/nupkg
 ## Usage
 
 ```
-ftrio-onetwo [path] [--env <name>] [--markdown <output.md>]
+ftrio-onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
 ```
 
 | Argument | Description |
 |---|---|
-| `path` | Path to the project or solution directory to scan. Defaults to the current directory. |
-| `--env <name>` | Override the active environment. Reads `appsettings.<name>.json` as an overlay on top of the base config. |
+| `--source <path>` | Directory to scan for toggle usage in `.cs` files. Defaults to the current directory. |
+| `--config <path>` | Directory to search for `appsettings*.json` files. Defaults to `--source` when not specified. |
+| `--env <name>` | Show a single environment using the base+overlay model (e.g. `--env Staging`). Omit to show all `appsettings` files as separate tables. |
 | `--markdown <file>` | Also write the results to a markdown file at the given path. |
 | `--help` / `-h` | Show usage. |
+
+`--source` and `--config` can also be passed as positional arguments — the first positional value is the source path, the second is the config path.
 
 **Examples:**
 
 ```bash
-# Scan a project — environment auto-detected from FtrIO:Environment in appsettings.json
-ftrio-onetwo C:\Projects\MyApp
+# Scan a project — source and config in the same directory
+ftrio-onetwo --source C:\Projects\MyApp
+
+# Source code and config files in separate locations
+ftrio-onetwo --source C:\Projects\MyApp --config C:\Projects\MyApp\bin\Debug\net10.0
+
+# Positional shorthand (source then config)
+ftrio-onetwo "C:\Projects\MyApp" "C:\Server\configs"
 
 # Explicitly scan against the Staging overlay
-ftrio-onetwo C:\Projects\MyApp --env Staging
+ftrio-onetwo --source C:\Projects\MyApp --env Staging
 
 # Also emit a markdown report
-ftrio-onetwo C:\Projects\MyApp --env Production --markdown toggles.md
+ftrio-onetwo --source C:\Projects\MyApp --config C:\Server\configs --env Production --markdown toggles.md
 
 # Scan the current directory
 ftrio-onetwo
@@ -186,7 +195,8 @@ With this setup, `--env Staging` resolves `NewCheckoutFlow` to `50%` and fills `
 ```bash
 cd FtrIO.OneTwo
 dotnet build
-dotnet run -- <path>
+dotnet run -- --source <path>
+dotnet run -- --source <source-path> --config <config-path>
 ```
 
 ## Related
