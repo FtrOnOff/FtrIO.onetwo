@@ -45,7 +45,7 @@ internal static class AppSettingsReader
             var baseToggles = ReadFile(baseFile, out _);
             var dir = Path.GetDirectoryName(baseFile)!;
             var overlayFile = Path.Combine(dir, $"appsettings.{envName}.json");
-            var overlayToggles = File.Exists(overlayFile) ? ReadFile(overlayFile, out _) : [];
+            var overlayToggles = File.Exists(overlayFile) ? ReadFile(overlayFile, out _) : new Dictionary<string, string>();
 
             if (File.Exists(overlayFile)) foundOverlayPath ??= overlayFile;
 

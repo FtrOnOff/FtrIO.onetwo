@@ -69,14 +69,14 @@ if (codeEntries.Count == 0)
 List<EnvironmentResult> environments;
 if (envOverride is not null)
 {
-    environments = [AppSettingsReader.ReadForEnv(configPath, envOverride)];
+    environments = new List<EnvironmentResult> { AppSettingsReader.ReadForEnv(configPath, envOverride) };
 }
 else
 {
     var allFiles = AppSettingsReader.ReadAll(configPath);
     environments = allFiles.Count > 0
-        ? [.. allFiles]
-        : [new EnvironmentResult("appsettings.json", "appsettings.json", [])];
+        ? new List<EnvironmentResult>(allFiles)
+        : new List<EnvironmentResult> { new EnvironmentResult("appsettings.json", "appsettings.json", new Dictionary<string, string>()) };
 }
 
 var mdBuilder = markdownPath is not null ? new System.Text.StringBuilder() : null;
