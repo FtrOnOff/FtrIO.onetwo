@@ -2,11 +2,11 @@
 
 A .NET CLI tool that scans a project directory for [FtrIO](https://github.com/FtrOnOff/FtrIO) feature toggle usage and reports the current state of every toggle.
 
-Because FtrIO always resolves toggle state from `appsettings.json` at runtime, FtrIO.OneTwo gives you an instant at-a-glance view of exactly what is enabled or disabled in your codebase right now — and precisely where each toggle is used — without having to open a single source file or config manually.
+Because FtrIO always resolves toggle state from `appsettings.json` at runtime, FtrIO.onetwo gives you an instant at-a-glance view of exactly what is enabled or disabled in your codebase right now — and precisely where each toggle is used — without having to open a single source file or config manually.
 
 ## What it does
 
-FtrIO.OneTwo walks a project's source tree, finds every toggle reference, cross-references it against `appsettings.json`, and outputs a table showing the current state of each toggle.
+FtrIO.onetwo walks a project's source tree, finds every toggle reference, cross-references it against `appsettings.json`, and outputs a table showing the current state of each toggle.
 
 It detects toggles from four patterns:
 
@@ -45,14 +45,14 @@ await featureToggle.ExecuteMethodIfToggleOnAsync(SyncDataAsync, "BetaSync");
 Pack and install as a global dotnet tool:
 
 ```bash
-dotnet pack ./FtrIO.OneTwo
-dotnet tool install -g FtrIO.OneTwo --add-source ./FtrIO.OneTwo/nupkg
+dotnet pack ./FtrIO.onetwo
+dotnet tool install -g FtrIO.onetwo --add-source ./FtrIO.onetwo/nupkg
 ```
 
 ## Usage
 
 ```
-ftrio-onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
+ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
 ```
 
 | Argument | Description |
@@ -69,22 +69,22 @@ ftrio-onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <out
 
 ```bash
 # Scan a project — source and config in the same directory
-ftrio-onetwo --source C:\Projects\MyApp
+ftrio.onetwo --source C:\Projects\MyApp
 
 # Source code and config files in separate locations
-ftrio-onetwo --source C:\Projects\MyApp --config C:\Projects\MyApp\bin\Debug\net10.0
+ftrio.onetwo --source C:\Projects\MyApp --config C:\Projects\MyApp\bin\Debug\net10.0
 
 # Positional shorthand (source then config)
-ftrio-onetwo "C:\Projects\MyApp" "C:\Server\configs"
+ftrio.onetwo "C:\Projects\MyApp" "C:\Server\configs"
 
 # Explicitly scan against the Staging overlay
-ftrio-onetwo --source C:\Projects\MyApp --env Staging
+ftrio.onetwo --source C:\Projects\MyApp --env Staging
 
 # Also emit a markdown report
-ftrio-onetwo --source C:\Projects\MyApp --config C:\Server\configs --env Production --markdown toggles.md
+ftrio.onetwo --source C:\Projects\MyApp --config C:\Server\configs --env Production --markdown toggles.md
 
 # Scan the current directory
-ftrio-onetwo
+ftrio.onetwo
 ```
 
 ## Example output
@@ -155,17 +155,17 @@ Scanning C:\Projects\MyApp...
 
 ### All environments (default)
 
-When no `--env` flag is given, FtrIO.OneTwo finds every `appsettings*.json` in the project tree and renders a separate table for each one. The environment name is derived from the filename — `appsettings.Staging.json` becomes `Staging`, and the base `appsettings.json` is shown verbatim. Each table header includes the full path to the file it was read from so there is never any ambiguity about which config is being shown.
+When no `--env` flag is given, FtrIO.onetwo finds every `appsettings*.json` in the project tree and renders a separate table for each one. The environment name is derived from the filename — `appsettings.Staging.json` becomes `Staging`, and the base `appsettings.json` is shown verbatim. Each table header includes the full path to the file it was read from so there is never any ambiguity about which config is being shown.
 
 Duplicate environment names are deduplicated — if the same name appears in both the source directory and `bin/`, the first one found wins.
 
 ### Targeting a specific environment
 
-Use `--env` to read a single environment. FtrIO.OneTwo applies FtrIO's overlay model: the environment-specific file's values win, and the base `appsettings.json` fills any gaps. The full path to the overlay file is shown in the table header.
+Use `--env` to read a single environment. FtrIO.onetwo applies FtrIO's overlay model: the environment-specific file's values win, and the base `appsettings.json` fills any gaps. The full path to the overlay file is shown in the table header.
 
 ```bash
-ftrio-onetwo --source C:\Projects\MyApp --env Staging
-ftrio-onetwo --source C:\Projects\MyApp --env Production
+ftrio.onetwo --source C:\Projects\MyApp --env Staging
+ftrio.onetwo --source C:\Projects\MyApp --env Production
 ```
 
 ```json
@@ -193,7 +193,7 @@ With this setup, `--env Staging` resolves `NewCheckoutFlow` to `50%` and fills `
 ## Building from source
 
 ```bash
-cd FtrIO.OneTwo
+cd FtrIO.onetwo
 dotnet build
 dotnet run -- --source <path>
 dotnet run -- --source <source-path> --config <config-path>

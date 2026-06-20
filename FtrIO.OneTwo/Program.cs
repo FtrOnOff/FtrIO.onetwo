@@ -1,7 +1,7 @@
 using FtrIO.OneTwo;
 using Spectre.Console;
 
-// Usage: ftrio-onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
+// Usage: ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
 string? markdownPath = null;
 string? envOverride = null;
 string? sourcePath = null;
@@ -19,7 +19,7 @@ for (int i = 0; i < args.Length; i++)
         configPath = args[++i];
     else if (args[i] == "--help" || args[i] == "-h")
     {
-        AnsiConsole.MarkupLine("[bold]ftrio-onetwo[/] [[--source <path>]] [[--config <path>]] [[--env <name>]] [[--markdown <output.md>]]");
+        AnsiConsole.MarkupLine("[bold]ftrio.onetwo[/] [[--source <path>]] [[--config <path>]] [[--env <name>]] [[--markdown <output.md>]]");
         AnsiConsole.MarkupLine("  Scans source code for FtrIO [[Toggle]] usage and cross-references against appsettings files.");
         AnsiConsole.MarkupLine("  --source    Directory to scan for toggle usage in .cs files. Defaults to current directory.");
         AnsiConsole.MarkupLine("  --config    Directory to search for appsettings*.json files. Defaults to --source.");

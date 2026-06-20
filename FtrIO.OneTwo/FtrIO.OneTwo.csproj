@@ -6,10 +6,10 @@
     <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>ftrio-onetwo</AssemblyName>
+    <AssemblyName>ftrio.onetwo</AssemblyName>
     <PackAsTool>true</PackAsTool>
-    <ToolCommandName>ftrio-onetwo</ToolCommandName>
-    <PackageId>FtrIO.OneTwo</PackageId>
+    <ToolCommandName>ftrio.onetwo</ToolCommandName>
+    <PackageId>FtrIO.onetwo</PackageId>
     <Version>1.0.0</Version>
   </PropertyGroup>
 
