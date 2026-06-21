@@ -1,4 +1,5 @@
 using FtrIO.OneTwo;
+using FtrIO.OneTwo.Eject;
 using FtrIO.OneTwo.ExportManifest;
 using FtrIO.OneTwo.ReleaseCheck;
 using Spectre.Console;
@@ -15,16 +16,16 @@ if (args.Length > 0 && args[0] == "eject")
 
 if (args.Length > 0 && args[0] == "export-manifest")
     return ExportManifestCommand.Run(args[1..]);
+
 if (args.Length > 0 && args[0] == "release-check")
     return ReleaseCheckCommand.Run(args[1..]);
-if (args.Length > 0 && args[0] == "export-manifest") return ExportManifestCommand.Run(args[1..]);
-if (args.Length > 0 && args[0] == "release-check")   return ReleaseCheckCommand.Run(args[1..]);
 
-// Usage: ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
+// Usage: ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>] [--show-overrides]
 string? markdownPath = null;
 string? envOverride = null;
 string? sourcePath = null;
 string? configPath = null;
+bool showOverrides = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -36,15 +37,18 @@ for (int i = 0; i < args.Length; i++)
         sourcePath = args[++i];
     else if (args[i] == "--config" && i + 1 < args.Length)
         configPath = args[++i];
+    else if (args[i] == "--show-overrides")
+        showOverrides = true;
     else if (args[i] == "--help" || args[i] == "-h")
     {
-        AnsiConsole.MarkupLine("[bold]ftrio.onetwo[/] [[--source <path>]] [[--config <path>]] [[--env <name>]] [[--markdown <output.md>]]");
+        AnsiConsole.MarkupLine("[bold]ftrio.onetwo[/] [[--source <path>]] [[--config <path>]] [[--env <name>]] [[--markdown <output.md>]] [[--show-overrides]]");
         AnsiConsole.MarkupLine("  Scans source code for FtrIO [[Toggle]] usage and cross-references against appsettings files.");
-        AnsiConsole.MarkupLine("  --source    Directory to scan for toggle usage in .cs files. Defaults to current directory.");
-        AnsiConsole.MarkupLine("  --config    Directory to search for appsettings*.json files. Defaults to --source.");
-        AnsiConsole.MarkupLine("  --env       Show a single environment using the base+overlay model (e.g. --env Staging).");
-        AnsiConsole.MarkupLine("              Omit to show all appsettings files as separate tables.");
-        AnsiConsole.MarkupLine("  --markdown  Write results to a markdown file.");
+        AnsiConsole.MarkupLine("  --source          Directory to scan for toggle usage in .cs files. Defaults to current directory.");
+        AnsiConsole.MarkupLine("  --config          Directory to search for appsettings*.json files. Defaults to --source.");
+        AnsiConsole.MarkupLine("  --env             Show a single environment using the base+overlay model (e.g. --env Staging).");
+        AnsiConsole.MarkupLine("                    Omit to show all appsettings files as separate tables.");
+        AnsiConsole.MarkupLine("  --markdown        Write results to a markdown file.");
+        AnsiConsole.MarkupLine("  --show-overrides  Add an Overrides column showing per-user TogglesOverrides values.");
         return 0;
     }
     else if (!args[i].StartsWith("--"))
@@ -115,11 +119,15 @@ foreach (var env in environments)
         .Select(e => e with { State = env.Toggles.TryGetValue(e.ToggleKey, out var s) ? s : null })
         .ToList();
 
+    var slotHint = env.BlueGreenCurrentSlot is not null
+        ? $" [grey](current slot: {Markup.Escape(env.BlueGreenCurrentSlot)})[/]"
+        : string.Empty;
+
     var envLabel = env.DisplayName == "appsettings.json"
         ? $"[bold white]{Markup.Escape(env.DisplayName)}[/]"
         : $"[bold cyan]{Markup.Escape(env.DisplayName)}[/]";
 
-    AnsiConsole.MarkupLine($"── {envLabel} [grey]{Markup.Escape(env.FilePath)}[/]");
+    AnsiConsole.MarkupLine($"── {envLabel} [grey]{Markup.Escape(env.FilePath)}[/]{slotHint}");
 
     var table = new Table()
         .Border(TableBorder.Rounded)
@@ -129,6 +137,9 @@ foreach (var env in environments)
         .AddColumn(new TableColumn("[bold]State[/]").Centered())
         .AddColumn(new TableColumn("[bold]File[/]"))
         .AddColumn(new TableColumn("[bold]Line[/]").RightAligned());
+
+    if (showOverrides)
+        table.AddColumn(new TableColumn("[bold]Overrides[/]"));
 
     foreach (var e in entries)
     {
@@ -140,27 +151,62 @@ foreach (var env in environments)
             _                            => "[grey]ManualCall[/]"
         };
 
-        table.AddRow(
+        var parsed = ToggleStateParser.Parse(e.State, env.BlueGreenCurrentSlot, env.BlueGreenKnownSlots);
+        var stateCell = ToggleStateParser.FormatConsole(parsed);
+
+        var row = new string[]
+        {
             $"[bold]{Markup.Escape(e.ToggleKey)}[/]",
             Markup.Escape(e.MethodName),
             sourceLabel,
-            FormatState(e.State),
+            stateCell,
             Markup.Escape(e.File),
-            e.Line.ToString());
+            e.Line.ToString()
+        };
+
+        if (showOverrides)
+        {
+            var overrideCell = FormatOverrides(e.ToggleKey, env.Overrides);
+            table.AddRow(row.Append(overrideCell).ToArray());
+        }
+        else
+        {
+            table.AddRow(row);
+        }
     }
 
     AnsiConsole.Write(table);
+
+    // Notify about overrides when --show-overrides is not active
+    if (!showOverrides && env.Overrides is not null)
+    {
+        var keysWithOverrides = entries
+            .Select(e => e.ToggleKey)
+            .Where(k => env.Overrides.ContainsKey(k))
+            .ToList();
+        if (keysWithOverrides.Count > 0)
+            AnsiConsole.MarkupLine($"[grey]⚡ TogglesOverrides present for: {string.Join(", ", keysWithOverrides.Select(Markup.Escape))}. Use --show-overrides to display per-user values.[/]");
+    }
+
+    var parsedEntries = entries
+        .Select(e => ToggleStateParser.Parse(e.State, env.BlueGreenCurrentSlot, env.BlueGreenKnownSlots))
+        .ToList();
+
     AnsiConsole.MarkupLine(
         $"[grey]{entries.Count} toggle(s). " +
-        $"{entries.Count(x => IsOn(x.State))} ON, " +
-        $"{entries.Count(x => IsOff(x.State))} OFF, " +
-        $"{entries.Count(x => IsPercentage(x.State))} PERCENTAGE, " +
-        $"{entries.Count(x => IsBlueGreen(x.State))} BLUE/GREEN, " +
-        $"{entries.Count(x => x.State == null)} MISSING.[/]\n");
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.On)} ON, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.Off)} OFF, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.Percentage)} PERCENTAGE, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.BlueGreenUnresolved)} BLUE/GREEN, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.AbTest)} AB-TEST, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.Targeted)} TARGETED, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.RuleBased)} RULE-BASED, " +
+        $"{parsedEntries.Count(p => p.Kind == ToggleStateKind.Missing)} [red]MISSING[/].[/]\n");
 
     if (mdBuilder is not null)
     {
-        mdBuilder.AppendLine($"## {env.DisplayName}");
+        var slotHintMd = env.BlueGreenCurrentSlot is not null ? $" *(current slot: {env.BlueGreenCurrentSlot})*" : string.Empty;
+        mdBuilder.AppendLine($"## {env.DisplayName}{slotHintMd}");
         mdBuilder.AppendLine();
         mdBuilder.AppendLine($"`{env.FilePath}`");
         mdBuilder.AppendLine();
@@ -168,7 +214,7 @@ foreach (var env in environments)
         mdBuilder.AppendLine("|---|---|---|---|---|---|");
         foreach (var e in entries)
         {
-            var state = MarkdownRenderer.FormatState(e.State);
+            var state = MarkdownRenderer.FormatState(e.State, env.BlueGreenCurrentSlot, env.BlueGreenKnownSlots);
             var source = e.Source switch
             {
                 ToggleSource.Attribute       => "\\[Toggle\\]",
@@ -190,25 +236,9 @@ if (markdownPath is not null)
 
 return 0;
 
-static bool IsOn(string? state) =>
-    state is not null && (state.Equals("true", StringComparison.OrdinalIgnoreCase) || state == "1");
-
-static bool IsOff(string? state) =>
-    state is not null && (state.Equals("false", StringComparison.OrdinalIgnoreCase) || state == "0");
-
-static bool IsPercentage(string? state) =>
-    state is not null && state.EndsWith('%');
-
-static bool IsBlueGreen(string? state) =>
-    state is not null && (state.Equals("blue", StringComparison.OrdinalIgnoreCase) ||
-                          state.Equals("green", StringComparison.OrdinalIgnoreCase));
-
-static string FormatState(string? state) => state switch
+static string FormatOverrides(string toggleKey, IReadOnlyDictionary<string, IReadOnlyDictionary<string, bool>>? overrides)
 {
-    null                       => "[yellow]MISSING[/]",
-    _ when IsOn(state)         => "[green]ON[/]",
-    _ when IsOff(state)        => "[red]OFF[/]",
-    _ when IsPercentage(state) => $"[cyan]{Markup.Escape(state)}[/]",
-    _ when IsBlueGreen(state)  => $"[blue]{Markup.Escape(state.ToUpperInvariant())}[/]",
-    _                          => $"[grey]{Markup.Escape(state)}[/]"
-};
+    if (overrides is null || !overrides.TryGetValue(toggleKey, out var perUser) || perUser.Count == 0)
+        return string.Empty;
+    return string.Join(", ", perUser.Select(kv => $"{Markup.Escape(kv.Key)}={( kv.Value ? "[green]on[/]" : "[red]off[/]" )}"));
+}
