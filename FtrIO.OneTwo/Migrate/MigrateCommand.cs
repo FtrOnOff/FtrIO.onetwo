@@ -37,7 +37,7 @@ internal static class MigrateCommand
         if (from is null)
         {
             AnsiConsole.MarkupLine("[red]Error:[/] --from is required for migrate command.");
-            AnsiConsole.MarkupLine("  Valid values: launchdarkly, flagsmith");
+            AnsiConsole.MarkupLine("  Valid values: launchdarkly, flagsmith, microsoft.featuremanagement");
             return 1;
         }
 
@@ -58,9 +58,26 @@ internal static class MigrateCommand
         AnsiConsole.MarkupLine($"[grey]Scanning[/] [yellow]{Markup.Escape(source)}[/] [grey]for {Markup.Escape(from)} SDK patterns...[/]");
         var codeEntries = SdkScanner.Scan(source);
 
-        // Fetch API flags if api-key provided
+        // Fetch flags — from API (LD/Flagsmith) or local config (Microsoft.FeatureManagement)
         Dictionary<string, ApiFlagInfo>? apiFlagsByKey = null;
-        if (apiKey is not null)
+        bool isMsft = from.Equals("microsoft.featuremanagement", StringComparison.OrdinalIgnoreCase);
+
+        if (isMsft)
+        {
+            // Microsoft.FeatureManagement reads from local config — no API key needed
+            var configFile = config is not null && File.Exists(config)
+                ? config
+                : Path.Combine(source, "appsettings.json");
+            try
+            {
+                apiFlagsByKey = FetchMicrosoftFeatureManagementFlags(configFile);
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Warning:[/] Could not read FeatureManagement config: {Markup.Escape(ex.Message)}");
+            }
+        }
+        else if (apiKey is not null)
         {
             try
             {
@@ -133,6 +150,7 @@ internal static class MigrateCommand
 
     private static void PrintActionBlocks(IReadOnlyList<MigrationEntry> entries, string from)
     {
+        bool isMsft = from.Equals("microsoft.featuremanagement", StringComparison.OrdinalIgnoreCase);
         var ready = entries.Where(e => e.Status == MigrationStatus.ReadyToMigrate).ToList();
         var needsReview = entries.Where(e => e.Status == MigrationStatus.NeedsReview).ToList();
         var cannotMigrate = entries.Where(e => e.Status == MigrationStatus.CannotMigrate).ToList();
@@ -143,10 +161,29 @@ internal static class MigrateCommand
             foreach (var e in ready)
             {
                 AnsiConsole.MarkupLine($"[green]✅ {Markup.Escape(e.NormalisedKey)}[/] — ready to migrate");
-                AnsiConsole.MarkupLine($"   Replace: [grey]if (client.{Markup.Escape(e.SdkMethod)}(\"{Markup.Escape(e.FlagKey)}\", user, false)) {{ ... }}[/]");
-                AnsiConsole.MarkupLine($"   With:    [grey]Extract the toggled block into a method named {Markup.Escape(e.NormalisedKey)}(), decorate with [[Toggle]][/]");
+
+                if (isMsft && e.SdkMethod == "FeatureGate")
+                {
+                    AnsiConsole.MarkupLine($"   Replace: [grey][[FeatureGate(\"{Markup.Escape(e.FlagKey)}\")]] on {Markup.Escape(e.NormalisedKey)}()[/]");
+                    AnsiConsole.MarkupLine($"   With:    [grey][[Toggle]] on {Markup.Escape(e.NormalisedKey)}()[/] — direct 1:1 replacement");
+                }
+                else if (isMsft)
+                {
+                    AnsiConsole.MarkupLine($"   Replace: [grey]await _featureManager.{Markup.Escape(e.SdkMethod)}(\"{Markup.Escape(e.FlagKey)}\")[/]");
+                    AnsiConsole.MarkupLine($"   With:    [grey]Extract the toggled block into a method named {Markup.Escape(e.NormalisedKey)}(), decorate with [[Toggle]][/]");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"   Replace: [grey]if (client.{Markup.Escape(e.SdkMethod)}(\"{Markup.Escape(e.FlagKey)}\", user, false)) {{ ... }}[/]");
+                    AnsiConsole.MarkupLine($"   With:    [grey]Extract the toggled block into a method named {Markup.Escape(e.NormalisedKey)}(), decorate with [[Toggle]][/]");
+                }
+
                 if (e.CurrentValue is not null)
                     AnsiConsole.MarkupLine($"   Add to appsettings.json: [cyan]\"{Markup.Escape(e.NormalisedKey)}\": \"{Markup.Escape(e.CurrentValue)}\"[/]");
+
+                if (isMsft)
+                    AnsiConsole.MarkupLine($"   Remove from FeatureManagement section: [grey]\"{Markup.Escape(e.FlagKey)}\"[/]");
+
                 AnsiConsole.WriteLine();
             }
         }
@@ -218,14 +255,32 @@ internal static class MigrateCommand
 
             if (status == MigrationStatus.ReadyToMigrate)
             {
+                bool isMsftMd = from.Equals("microsoft.featuremanagement", StringComparison.OrdinalIgnoreCase);
                 foreach (var e in group)
                 {
                     sb.AppendLine($"### ✅ {e.NormalisedKey}");
                     sb.AppendLine();
-                    sb.AppendLine($"Replace: `if (client.{e.SdkMethod}(\"{e.FlagKey}\", user, false)) {{ ... }}`  ");
-                    sb.AppendLine($"With: Extract the toggled block into a method named `{e.NormalisedKey}()`, decorate with `[Toggle]`  ");
+
+                    if (isMsftMd && e.SdkMethod == "FeatureGate")
+                    {
+                        sb.AppendLine($"Replace: `[FeatureGate(\"{e.FlagKey}\")]` on `{e.NormalisedKey}()`  ");
+                        sb.AppendLine($"With: `[Toggle]` on `{e.NormalisedKey}()` — direct 1:1 replacement  ");
+                    }
+                    else if (isMsftMd)
+                    {
+                        sb.AppendLine($"Replace: `await _featureManager.{e.SdkMethod}(\"{e.FlagKey}\")`  ");
+                        sb.AppendLine($"With: Extract the toggled block into a method named `{e.NormalisedKey}()`, decorate with `[Toggle]`  ");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"Replace: `if (client.{e.SdkMethod}(\"{e.FlagKey}\", user, false)) {{ ... }}`  ");
+                        sb.AppendLine($"With: Extract the toggled block into a method named `{e.NormalisedKey}()`, decorate with `[Toggle]`  ");
+                    }
+
                     if (e.CurrentValue is not null)
                         sb.AppendLine($"Add to appsettings.json: `\"{e.NormalisedKey}\": \"{e.CurrentValue}\"`  ");
+                    if (isMsftMd)
+                        sb.AppendLine($"Remove from FeatureManagement section: `\"{e.FlagKey}\"`  ");
                     sb.AppendLine();
                 }
             }
@@ -270,6 +325,23 @@ internal static class MigrateCommand
             "flagsmith"    => FetchFlagsmithFlags(apiKey, env),
             _ => throw new InvalidOperationException($"Unsupported --from value: {from}")
         };
+    }
+
+    private static Dictionary<string, ApiFlagInfo> FetchMicrosoftFeatureManagementFlags(string configFile)
+    {
+        var source = new MicrosoftFeatureManagementSource(configFile);
+        var flags = source.FetchAsync().GetAwaiter().GetResult();
+
+        var result = new Dictionary<string, ApiFlagInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var flag in flags)
+        {
+            // Keys stay PascalCase — no normalisation needed for Microsoft.FeatureManagement
+            result[flag.OriginalKey] = new ApiFlagInfo(
+                "boolean",
+                flag.Status == FlagStatus.Approximated,   // complex filter = NeedsReview
+                flag.Value);
+        }
+        return result;
     }
 
     private static Dictionary<string, ApiFlagInfo> FetchLaunchDarklyFlags(

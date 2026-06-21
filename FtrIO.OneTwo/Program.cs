@@ -1,4 +1,5 @@
 using FtrIO.OneTwo;
+using FtrIO.OneTwo.Eject;
 using FtrIO.OneTwo.ExportManifest;
 using FtrIO.OneTwo.ReleaseCheck;
 using Spectre.Console;
@@ -9,6 +10,9 @@ if (args.Length > 0 && args[0] == "import")
 
 if (args.Length > 0 && args[0] == "migrate")
     return MigrateCommand.Run(args[1..]);
+
+if (args.Length > 0 && args[0] == "eject")
+    return EjectCommand.Run(args[1..]);
 
 if (args.Length > 0 && args[0] == "export-manifest")
     return ExportManifestCommand.Run(args[1..]);

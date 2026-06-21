@@ -54,7 +54,7 @@ internal static class ImportCommand
         IFlagSource flagSource;
         try
         {
-            flagSource = CreateSource(source, apiKey, project, env, url, file, prefix);
+            flagSource = CreateSource(source, apiKey, project, env, url, file, prefix, config);
         }
         catch (Exception ex)
         {
@@ -222,16 +222,18 @@ internal static class ImportCommand
         string? env,
         string? url,
         string? file,
-        string? prefix)
+        string? prefix,
+        string? config = null)
     {
         return source.ToLowerInvariant() switch
         {
-            "launchdarkly" => CreateLaunchDarkly(apiKey, project, env),
-            "flagsmith"    => CreateFlagsmith(apiKey, env),
-            "flagd"        => CreateFlagd(file),
-            "env"          => new EnvSource(prefix ?? string.Empty),
-            "http"         => CreateHttp(url),
-            _ => throw new InvalidOperationException($"Unknown source '{source}'. Valid: launchdarkly, flagsmith, flagd, env, http")
+            "launchdarkly"               => CreateLaunchDarkly(apiKey, project, env),
+            "flagsmith"                  => CreateFlagsmith(apiKey, env),
+            "flagd"                      => CreateFlagd(file),
+            "env"                        => new EnvSource(prefix ?? string.Empty),
+            "http"                       => CreateHttp(url),
+            "microsoft.featuremanagement"=> CreateMicrosoftFeatureManagement(file, config),
+            _ => throw new InvalidOperationException($"Unknown source '{source}'. Valid: launchdarkly, flagsmith, flagd, env, http, microsoft.featuremanagement")
         };
     }
 
@@ -267,5 +269,15 @@ internal static class ImportCommand
         if (string.IsNullOrWhiteSpace(url))
             throw new InvalidOperationException("--url is required for http source.");
         return new HttpSource(url);
+    }
+
+    private static IFlagSource CreateMicrosoftFeatureManagement(string? file, string? config)
+    {
+        var path = file ?? config;
+        if (string.IsNullOrWhiteSpace(path))
+            throw new InvalidOperationException(
+                "--file (or --config) is required for microsoft.featuremanagement source. " +
+                "Point it at your appsettings.json containing a FeatureManagement section.");
+        return new MicrosoftFeatureManagementSource(path);
     }
 }

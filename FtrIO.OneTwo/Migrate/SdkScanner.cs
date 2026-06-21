@@ -17,6 +17,13 @@ internal static class SdkScanner
         "HasFeatureFlagAsync", "GetFeatureFlagValueAsync"
     };
 
+    private static readonly HashSet<string> MsftMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "IsEnabled", "IsEnabledAsync"
+    };
+
+    private const string FeatureGateAttribute = "FeatureGate";
+
     internal record SdkCallEntry(string FlagKey, string SdkMethod, string File, int Line);
 
     internal static IReadOnlyList<SdkCallEntry> Scan(string projectRoot)
@@ -47,6 +54,26 @@ internal static class SdkScanner
         var tree = CSharpSyntaxTree.ParseText(source, path: filePath);
         var root = tree.GetRoot();
 
+        // Scan [FeatureGate("key")] attributes
+        foreach (var attribute in root.DescendantNodes().OfType<AttributeSyntax>())
+        {
+            var attrName = attribute.Name.ToString();
+            if (!attrName.Equals(FeatureGateAttribute, StringComparison.OrdinalIgnoreCase) &&
+                !attrName.Equals(FeatureGateAttribute + "Attribute", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var keyArg = attribute.ArgumentList?.Arguments
+                .Select(a => a.Expression)
+                .OfType<LiteralExpressionSyntax>()
+                .FirstOrDefault(l => l.IsKind(SyntaxKind.StringLiteralExpression));
+
+            if (keyArg is null) continue;
+
+            var key = keyArg.Token.ValueText;
+            var line = tree.GetLineSpan(attribute.Span).StartLinePosition.Line + 1;
+            results.Add(new SdkCallEntry(key, FeatureGateAttribute, relPath, line));
+        }
+
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
             string? methodName = invocation.Expression switch
@@ -60,7 +87,8 @@ internal static class SdkScanner
 
             bool isLd = LdMethods.Contains(methodName);
             bool isFlagsmith = FlagsmithMethods.Contains(methodName);
-            if (!isLd && !isFlagsmith) continue;
+            bool isMsft = MsftMethods.Contains(methodName);
+            if (!isLd && !isFlagsmith && !isMsft) continue;
 
             var args = invocation.ArgumentList.Arguments;
             var keyArg = args
