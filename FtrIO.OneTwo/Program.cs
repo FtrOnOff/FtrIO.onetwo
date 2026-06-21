@@ -1,6 +1,13 @@
 using FtrIO.OneTwo;
 using Spectre.Console;
 
+// Subcommand routing
+if (args.Length > 0 && args[0] == "import")
+    return ImportCommand.Run(args[1..]);
+
+if (args.Length > 0 && args[0] == "migrate")
+    return MigrateCommand.Run(args[1..]);
+
 // Usage: ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
 string? markdownPath = null;
 string? envOverride = null;

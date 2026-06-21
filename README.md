@@ -6,9 +6,17 @@ Because FtrIO always resolves toggle state from `appsettings.json` at runtime, F
 
 ## What it does
 
-FtrIO.onetwo walks a project's source tree, finds every toggle reference, cross-references it against `appsettings.json`, and outputs a table showing the current state of each toggle.
+FtrIO.onetwo has three modes:
 
-It detects toggles from four patterns:
+| Command | Purpose |
+|---|---|
+| `ftrio.onetwo` | Scan source code for toggle usage and report current state from `appsettings.json` |
+| `ftrio.onetwo import` | Pull flag state from an external source (LaunchDarkly, Flagsmith, flagd, env vars, HTTP) into `appsettings.json` |
+| `ftrio.onetwo migrate` | Scan for external SDK call sites, cross-reference against live flag state, generate a migration plan |
+
+### Toggle detection
+
+The default scan detects toggles from four patterns:
 
 | Pattern | Use case |
 |---|---|
@@ -188,6 +196,143 @@ ftrio.onetwo --source C:\Projects\MyApp --env Production
 With this setup, `--env Staging` resolves `NewCheckoutFlow` to `50%` and fills `SendWelcomeEmail` and `PaymentV2` from the base.
 
 > **Note:** FtrIO deliberately ignores `ASPNETCORE_ENVIRONMENT`, and so does this tool. Use `--env` on the command line to target a specific environment.
+
+## Import — pull flags from an external source
+
+`ftrio.onetwo import` fetches flag state from an external provider and writes it into the `Toggles` section of `appsettings.json` without touching anything else in the file. Designed as an escape hatch — run once to snapshot state, then migrate call sites at your own pace.
+
+**Supported sources:** `launchdarkly`, `flagsmith`, `flagd`, `env`, `http`
+
+| Argument | Description |
+|---|---|
+| `--source` | Source type (required): `launchdarkly`, `flagsmith`, `flagd`, `env`, `http` |
+| `--api-key` | Auth key for LaunchDarkly or Flagsmith |
+| `--project` | LaunchDarkly project key |
+| `--env` | Environment name |
+| `--url` | Endpoint URL for `http` source |
+| `--file` | Local file path for `flagd` source |
+| `--prefix` | Prefix to strip for `env` source (e.g. `FEATURE_`) |
+| `--config` | Path to `appsettings.json` to write (default: `appsettings.json` in current directory) |
+| `--dry-run` | Print what would change without writing anything |
+| `--overwrite` | Replace the entire `Toggles` section (default: merge, preserving untouched keys) |
+| `--markdown` | Also write a markdown summary to this file |
+| `--sync` | Run continuously, polling on `--interval` seconds |
+| `--interval` | Poll interval in seconds when using `--sync` (default: 30) |
+| `--fail-on-warnings` | Exit code 3 if any flags were approximated |
+
+**Flag normalisation:** external flag keys (`new-checkout-flow`) are automatically converted to PascalCase (`NewCheckoutFlow`) to match FtrIO's convention of using method names as toggle keys.
+
+**State mapping (LaunchDarkly):**
+
+| Flag type | Written value | Notes |
+|---|---|---|
+| Boolean, no targeting | `true` / `false` | Direct |
+| Percentage rollout | `"20%"` | Direct |
+| String, no targeting | Raw string | Direct |
+| Boolean with targeting rules | Off-variation value | Approximated — warning emitted |
+| Number flag | String of number | Approximated — warning emitted |
+| JSON flag | Not written | Unsupported — warning emitted |
+
+**Exit codes:** `0` success, `1` source unreachable/auth failure, `2` write failure, `3` warnings (only with `--fail-on-warnings`)
+
+```bash
+# LaunchDarkly — merge into appsettings.json
+ftrio.onetwo import --source launchdarkly --api-key sdk-xxx --project my-project --env production --config C:\Projects\MyApp\appsettings.json
+
+# Dry run — see what would change without writing
+ftrio.onetwo import --source launchdarkly --api-key sdk-xxx --project my-project --env production --dry-run
+
+# Flagsmith
+ftrio.onetwo import --source flagsmith --api-key env-xxx --env production --config C:\Projects\MyApp\appsettings.json
+
+# flagd local file
+ftrio.onetwo import --source flagd --file C:\flags\flags.json --config C:\Projects\MyApp\appsettings.json
+
+# Environment variables with prefix stripping
+ftrio.onetwo import --source env --prefix FEATURE_ --config C:\Projects\MyApp\appsettings.json
+
+# Continuous sync, polling every 60 seconds
+ftrio.onetwo import --source launchdarkly --api-key sdk-xxx --project my-project --env production --sync --interval 60
+```
+
+---
+
+## Migrate — analyse and plan migration from an external SDK
+
+`ftrio.onetwo migrate` scans `.cs` files for LaunchDarkly or Flagsmith SDK call patterns using Roslyn, cross-references them against live flag state (if `--api-key` is provided), and generates a migration report. **It does not modify any code** — the developer does the work guided by the report.
+
+| Argument | Description |
+|---|---|
+| `--from` | SDK to scan for (required): `launchdarkly`, `flagsmith` |
+| `--source` | Directory to scan for `.cs` files |
+| `--api-key` | Optional — fetches live flag state from the API |
+| `--project` | LaunchDarkly project key |
+| `--env` | Environment name |
+| `--config` | Directory containing `appsettings.json` |
+| `--markdown` | Write the full report to a markdown file |
+| `--exclude` | Comma-separated flag keys to exclude from the report |
+| `--fail-on-unsupported` | Exit code 1 if any unsupported flags are found |
+
+**SDK patterns detected:**
+
+```csharp
+// LaunchDarkly
+client.BoolVariation("flag-key", user, false)
+client.StringVariation("flag-key", user, "default")
+client.IntVariation("flag-key", user, 0)
+client.JsonVariation("flag-key", user, defaultValue)
+
+// Flagsmith
+flagsmithClient.HasFeatureFlagAsync("flag-key")
+flagsmithClient.GetFeatureFlagValueAsync("flag-key")
+```
+
+**Report categories:**
+
+| Status | Meaning |
+|---|---|
+| ✅ Ready to migrate | Boolean flag, no targeting rules — straightforward `[Toggle]` replacement |
+| ⚠️ Needs review | Targeting rules, number flags, or no API key provided |
+| ❌ Cannot migrate | JSON flags — recommend moving to `IConfiguration` options pattern |
+| Stale flag | In API but not referenced in code — safe to delete from the provider |
+| Deleted flag | Referenced in code but no longer exists in the API — potentially broken |
+
+For each **ready to migrate** flag the report shows the suggested refactor: extract the toggled block into a parent method named after the flag key, decorate it with `[Toggle]`, and add the key to `appsettings.json`.
+
+```bash
+# Full migration report with live flag state
+ftrio.onetwo migrate --from launchdarkly --api-key sdk-xxx --project my-project --env production --source C:\Projects\MyApp --markdown plan.md
+
+# Code scan only — no API key required
+ftrio.onetwo migrate --from launchdarkly --source C:\Projects\MyApp
+
+# Flagsmith
+ftrio.onetwo migrate --from flagsmith --api-key env-xxx --source C:\Projects\MyApp --markdown plan.md
+```
+
+---
+
+## End-to-end migration workflow
+
+```bash
+# 1. Generate the migration plan
+ftrio.onetwo migrate --from launchdarkly --api-key sdk-xxx --project my-project --env production --source C:\Projects\MyApp --markdown plan.md
+
+# 2. Review plan.md with the team
+
+# 3. Snapshot current flag state into appsettings.json
+ftrio.onetwo import --source launchdarkly --api-key sdk-xxx --project my-project --env production --config C:\Projects\MyApp\appsettings.json
+
+# 4. Verify the snapshot
+ftrio.onetwo --source C:\Projects\MyApp
+
+# 5. Migrate call sites guided by plan.md
+
+# 6. Verify toggles are all wired up correctly
+ftrio.onetwo --source C:\Projects\MyApp
+```
+
+---
 
 ## Building from source
 
