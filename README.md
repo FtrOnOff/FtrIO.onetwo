@@ -31,6 +31,8 @@ That's it. FtrIO.onetwo scans every `.cs` file in the directory, finds every `[T
 
 ## Coming from LaunchDarkly, Flagsmith, or Microsoft.FeatureManagement?
 
+> **⚠️ Experimental** — `migrate` and `import` are available now but have not been tested against live LaunchDarkly, Flagsmith, or Microsoft.FeatureManagement accounts. If you try this path we'd love to hear how it goes — please [open an issue](https://github.com/FtrOnOff/FtrIO.onetwo/issues) with your findings.
+
 FtrIO.onetwo makes onboarding from another provider a two-step process.
 
 ### Step 1 — See what needs changing
@@ -128,6 +130,8 @@ ftrio.onetwo --source C:\Projects\MyApp
 ---
 
 ## Want to leave? Eject cleanly.
+
+> **⚠️ Experimental** — `eject` is available now but has not been tested against live provider accounts. If you try this path we'd love to hear how it goes — please [open an issue](https://github.com/FtrOnOff/FtrIO.onetwo/issues) with your findings.
 
 `eject` is the reverse of `migrate` — it generates a complete exit report from FtrIO back to LaunchDarkly, Flagsmith, Microsoft.FeatureManagement, or Unleash. It can optionally create your flags in the target system with their current values before you change a line of code.
 
