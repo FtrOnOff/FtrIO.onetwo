@@ -1,5 +1,4 @@
 using FtrIO.OneTwo;
-using FtrIO.OneTwo.Eject;
 using FtrIO.OneTwo.ExportManifest;
 using FtrIO.OneTwo.ReleaseCheck;
 using Spectre.Console;
@@ -18,6 +17,8 @@ if (args.Length > 0 && args[0] == "export-manifest")
     return ExportManifestCommand.Run(args[1..]);
 if (args.Length > 0 && args[0] == "release-check")
     return ReleaseCheckCommand.Run(args[1..]);
+if (args.Length > 0 && args[0] == "export-manifest") return ExportManifestCommand.Run(args[1..]);
+if (args.Length > 0 && args[0] == "release-check")   return ReleaseCheckCommand.Run(args[1..]);
 
 // Usage: ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
 string? markdownPath = null;

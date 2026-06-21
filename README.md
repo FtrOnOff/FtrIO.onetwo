@@ -1,217 +1,230 @@
 ![FtrIO.onetwo](onetwo.png)
 
 A .NET CLI audit and migration tool for [FtrIO](https://github.com/FtrOnOff/FtrIO) feature toggles.
+A .NET CLI tool that scans a project directory for [FtrIO](https://github.com/FtrOnOff/FtrIO) feature toggle usage and reports the current state of every toggle.
 
----
+Because FtrIO always resolves toggle state from `appsettings.json` at runtime, FtrIO.onetwo gives you an instant at-a-glance view of exactly what is enabled or disabled in your codebase right now — and precisely where each toggle is used — without having to open a single source file or config manually.
 
-## Quickstart
+## What it does
+
+FtrIO.onetwo walks a project's source tree, finds every toggle reference, cross-references it against `appsettings.json`, and outputs a table showing the current state of each toggle.
+
+It detects toggles from four patterns:
+
+| Pattern | Use case |
+|---|---|
+| `[Toggle]` | Synchronous method gated by its own name |
+| `[ToggleAsync]` | `Task`-returning method gated by its own name |
+| `ExecuteMethodIfToggleOn(action, "key")` | Manual synchronous gating with an explicit key |
+| `ExecuteMethodIfToggleOnAsync(func, "key")` | Manual async gating with an explicit key |
+
+```csharp
+// Attribute — toggle key is inferred from the method name
+[Toggle]
+public void SendWelcomeEmail() { }
+
+[ToggleAsync]
+public async Task SendNewsletterAsync() { }
+
+// Manual call — toggle key is the string literal argument
+featureToggle.ExecuteMethodIfToggleOn(ProcessOrder, "NewCheckoutFlow");
+await featureToggle.ExecuteMethodIfToggleOnAsync(SyncDataAsync, "BetaSync");
+```
+
+## The FtrIO ecosystem
+
+- [**FtrIO**](https://github.com/FtrOnOff/FtrIO) — the core library. Weaves `[Toggle]` into your IL at compile time, reads state from `appsettings.json` at runtime, and optionally syncs from remote sources via the provider pipeline.
+- [**FtrIO.Toaster**](https://github.com/FtrOnOff/FtrIO.Toaster) — a lightweight web UI for managing toggles live. Writes values through `ToggleProviderBuffer` so changes flush to `appsettings.json` and are picked up instantly via `ReloadOnChange` — no file editing, no restart.
+- [**FtrIO.onetwo**](https://github.com/FtrOnOff/FtrIO.onetwo) — a .NET CLI audit tool. Scans your source tree for every toggle reference, cross-references against `appsettings.json`, and reports each toggle's state (`ON` / `OFF` / `AB-TEST` / `TARGETED` / `RULE-BASED` / `MISSING`) with file and line number.
+
+## Requirements
+
+- [.NET SDK](https://dotnet.microsoft.com/download) 6, 8, or 10 (net6.0, net8.0, and net10.0 are all supported)
+
+## Installation
+
+Install as a global dotnet tool from NuGet:
 
 ```bash
 dotnet tool install -g FtrIO.onetwo
+```
+
+## Usage
+
+```
+ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <output.md>]
+```
+
+| Argument | Description |
+|---|---|
+| `--source <path>` | Directory to scan for toggle usage in `.cs` files. Defaults to the current directory. |
+| `--config <path>` | Directory to search for `appsettings*.json` files. Defaults to `--source` when not specified. |
+| `--env <name>` | Show a single environment using the base+overlay model (e.g. `--env Staging`). Omit to show all `appsettings` files as separate tables. |
+| `--markdown <file>` | Also write the results to a markdown file at the given path. |
+| `--help` / `-h` | Show usage. |
+
+`--source` and `--config` can also be passed as positional arguments — the first positional value is the source path, the second is the config path.
+
+**Examples:**
+
+```bash
+# Scan a project — source and config in the same directory
 ftrio.onetwo --source C:\Projects\MyApp
+
+# Source code and config files in separate locations
+ftrio.onetwo --source C:\Projects\MyApp --config C:\Projects\MyApp\bin\Debug\net10.0
+
+# Positional shorthand (source then config)
+ftrio.onetwo "C:\Projects\MyApp" "C:\Server\configs"
+
+# Explicitly scan against the Staging overlay
+ftrio.onetwo --source C:\Projects\MyApp --env Staging
+
+# Also emit a markdown report
+ftrio.onetwo --source C:\Projects\MyApp --config C:\Server\configs --env Production --markdown toggles.md
+
+# Scan the current directory
+ftrio.onetwo
 ```
 
-That's it. FtrIO.onetwo scans every `.cs` file in the directory, finds every `[Toggle]` reference, and cross-references it against every `appsettings*.json` it can find — giving you an instant table of what's ON, OFF, or MISSING across all your environments.
+## Example output
+
+Without `--env`, each `appsettings*.json` file found is shown as a separate table:
 
 ```
-── Staging  C:\Projects\MyApp\appsettings.Staging.json
+Scanning C:\Projects\MyApp...
+
+── Development C:\Projects\MyApp\appsettings.Development.json
+╭──────────────────┬──────────────────┬──────────┬───────┬───────────────────┬──────╮
+│ Toggle Key       │ Method           │ Source   │ State │ File              │ Line │
+├──────────────────┼──────────────────┼──────────┼───────┼───────────────────┼──────┤
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle] │  80%  │ Services\Order.cs │    9 │
+│ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle] │  ON   │ Services\Email.cs │   22 │
+╰──────────────────┴──────────────────┴──────────┴───────┴───────────────────┴──────╯
+2 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 0 BLUE/GREEN, 0 MISSING.
+
+── appsettings.json C:\Projects\MyApp\appsettings.json
 ╭──────────────────┬──────────────────┬──────────┬─────────┬───────────────────┬──────╮
 │ Toggle Key       │ Method           │ Source   │  State  │ File              │ Line │
 ├──────────────────┼──────────────────┼──────────┼─────────┼───────────────────┼──────┤
-│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle] │   50%   │ Services\Order.cs │    9 │
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle] │   OFF   │ Services\Order.cs │    9 │
 │ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle] │   ON    │ Services\Email.cs │   22 │
-│ UnknownFeature   │ UnknownFeature   │ ManualCall│ MISSING │ Controllers\Ho...│   42 │
 ╰──────────────────┴──────────────────┴──────────┴─────────┴───────────────────┴──────╯
-3 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 0 BLUE/GREEN, 1 MISSING.
+2 toggle(s). 1 ON, 1 OFF, 0 PERCENTAGE, 0 BLUE/GREEN, 0 MISSING.
+
+── Staging C:\Projects\MyApp\appsettings.Staging.json
+╭──────────────────┬──────────────────┬────────────┬─────────┬───────────────────┬──────╮
+│ Toggle Key       │ Method           │ Source     │  State  │ File              │ Line │
+├──────────────────┼──────────────────┼────────────┼─────────┼───────────────────┼──────┤
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle]   │   50%   │ Services\Order.cs │    9 │
+│ PaymentV2        │ PaymentV2        │ [Toggle]   │  BLUE   │ Services\Pay.cs   │    6 │
+│ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle]   │   ON    │ Services\Email.cs │   22 │
+│ UnknownFeature   │ UnknownFeature   │ ManualCall │ MISSING │ Controllers\Ho... │   42 │
+╰──────────────────┴──────────────────┴────────────┴─────────┴───────────────────┴──────╯
+4 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 1 BLUE/GREEN, 1 MISSING.
 ```
 
-**Requirements:** [.NET SDK](https://dotnet.microsoft.com/download) 6, 8, or 10
+With `--env`, a single table is shown for that environment alongside its file path:
 
----
+```
+Scanning C:\Projects\MyApp...
 
-## Coming from LaunchDarkly, Flagsmith, Unleash, or Microsoft.FeatureManagement?
-
-> **⚠️ Experimental** — `migrate` and `import` are available now but have not been tested against live LaunchDarkly, Flagsmith, Unleash, or Microsoft.FeatureManagement accounts. If you try this path we'd love to hear how it goes — please [open an issue](https://github.com/FtrOnOff/FtrIO.onetwo/issues) with your findings.
-
-FtrIO.onetwo makes onboarding from another provider a two-step process.
-
-### Step 1 — See what needs changing
-
-`migrate` scans your code for existing SDK call patterns, cross-references them against your live flag state, and tells you exactly what to change and in what order.
-
-```bash
-# From LaunchDarkly
-ftrio.onetwo migrate --from launchdarkly \
-  --api-key sdk-xxx --project my-project --env production \
-  --source C:\Projects\MyApp --markdown plan.md
-
-# From Flagsmith
-ftrio.onetwo migrate --from flagsmith \
-  --api-key env-xxx \
-  --source C:\Projects\MyApp --markdown plan.md
-
-# From Unleash — self-hosted, needs base URL
-ftrio.onetwo migrate --from unleash \
-  --api-key my-admin-token --url https://unleash.example.com \
-  --source C:\Projects\MyApp --markdown plan.md
-
-# From Microsoft.FeatureManagement — no API key needed, reads local config
-ftrio.onetwo migrate --from microsoft.featuremanagement \
-  --source C:\Projects\MyApp --markdown plan.md
+── Staging C:\Projects\MyApp\appsettings.Staging.json
+╭──────────────────┬──────────────────┬────────────┬─────────┬───────────────────┬──────╮
+│ Toggle Key       │ Method           │ Source     │  State  │ File              │ Line │
+├──────────────────┼──────────────────┼────────────┼─────────┼───────────────────┼──────┤
+│ NewCheckoutFlow  │ NewCheckoutFlow  │ [Toggle]   │   50%   │ Services\Order.cs │    9 │
+│ PaymentV2        │ PaymentV2        │ [Toggle]   │  BLUE   │ Services\Pay.cs   │    6 │
+│ SendWelcomeEmail │ SendWelcomeEmail │ [Toggle]   │   ON    │ Services\Email.cs │   22 │
+│ UnknownFeature   │ UnknownFeature   │ ManualCall │ MISSING │ Controllers\Ho... │   42 │
+╰──────────────────┴──────────────────┴────────────┴─────────┴───────────────────┴──────╯
+4 toggle(s). 1 ON, 0 OFF, 1 PERCENTAGE, 1 BLUE/GREEN, 1 MISSING.
 ```
 
-The report categorises every flag:
+## States
 
-| Status | Meaning |
+| State | Meaning |
 |---|---|
-| ✅ Ready to migrate | Straightforward `[Toggle]` replacement — action shown |
-| ⚠️ Needs review | Targeting rules or complex config — options shown |
-| ❌ Cannot migrate | JSON flags — recommend `IConfiguration` options pattern |
-| Stale flag | In provider but not in code — safe to delete |
-| Deleted flag | In code but gone from provider — potentially broken |
+| `ON` | Toggle is `true` or `1` in `appsettings.json` |
+| `OFF` | Toggle is `false` or `0` in `appsettings.json` |
+| `20%` | Percentage rollout — the raw value (e.g. `"20%"`) is shown directly |
+| `BLUE` / `GREEN` | Blue-green deployment slot — shown in uppercase |
+| `MISSING` | Toggle key is used in code but has no entry in any `appsettings*.json` file |
 
-**Detected patterns:**
+## Multi-environment support
 
-```csharp
-// LaunchDarkly
-client.BoolVariation("flag-key", user, false)
-client.StringVariation("flag-key", user, "default")
+### All environments (default)
 
-// Flagsmith
-flagsmithClient.HasFeatureFlagAsync("flag-key")
+When no `--env` flag is given, FtrIO.onetwo finds every `appsettings*.json` in the project tree and renders a separate table for each one. The environment name is derived from the filename — `appsettings.Staging.json` becomes `Staging`, and the base `appsettings.json` is shown verbatim. Each table header includes the full path to the file it was read from so there is never any ambiguity about which config is being shown.
 
-// Unleash
-unleashClient.IsEnabled("flag-key")
-unleashClient.GetVariant("flag-key")   // detected as cannot migrate (multivariate)
+Duplicate environment names are deduplicated — if the same name appears in both the source directory and `bin/`, the first one found wins.
 
-// Microsoft.FeatureManagement
-[FeatureGate("flag-key")]
-featureManager.IsEnabled("flag-key")
-featureManager.IsEnabledAsync("flag-key")
-```
+### Targeting a specific environment
 
-### Step 2 — Snapshot current flag state
-
-`import` pulls the current value of every flag from your provider and writes it into the `Toggles` section of `appsettings.json` — so FtrIO is already configured with the right state before you change a single line of code.
+Use `--env` to read a single environment. FtrIO.onetwo applies FtrIO's overlay model: the environment-specific file's values win, and the base `appsettings.json` fills any gaps. The full path to the overlay file is shown in the table header.
 
 ```bash
-# From LaunchDarkly
-ftrio.onetwo import --source launchdarkly \
-  --api-key sdk-xxx --project my-project --env production \
-  --config C:\Projects\MyApp\appsettings.json
-
-# From Flagsmith
-ftrio.onetwo import --source flagsmith \
-  --api-key env-xxx \
-  --config C:\Projects\MyApp\appsettings.json
-
-# From Unleash — self-hosted, needs base URL
-ftrio.onetwo import --source unleash \
-  --api-key my-admin-token --url https://unleash.example.com \
-  --config C:\Projects\MyApp\appsettings.json
-
-# From Microsoft.FeatureManagement — reads FeatureManagement section, writes to Toggles
-ftrio.onetwo import --source microsoft.featuremanagement \
-  --file C:\Projects\MyApp\appsettings.json \
-  --config C:\Projects\MyApp\appsettings.json
-
-# From flagd, env vars, or HTTP
-ftrio.onetwo import --source flagd --file C:\flags\flags.json --config ...
-ftrio.onetwo import --source env --prefix FEATURE_ --config ...
-ftrio.onetwo import --source http --url https://config.example.com/flags --config ...
+ftrio.onetwo --source C:\Projects\MyApp --env Staging
+ftrio.onetwo --source C:\Projects\MyApp --env Production
 ```
 
-After importing, run `ftrio.onetwo --source C:\Projects\MyApp` to verify every flag resolved correctly before you touch any call sites.
+```json
+// appsettings.json — base config
+{
+  "Toggles": {
+    "SendWelcomeEmail": true,
+    "NewCheckoutFlow": false,
+    "PaymentV2": "blue"
+  }
+}
 
-### Full onboarding workflow
-
-```bash
-# 1. See what needs to change
-ftrio.onetwo migrate --from launchdarkly --api-key sdk-xxx --project my-project --env production --source C:\Projects\MyApp --markdown plan.md
-
-# 2. Snapshot current flag state
-ftrio.onetwo import --source launchdarkly --api-key sdk-xxx --project my-project --env production --config C:\Projects\MyApp\appsettings.json
-
-# 3. Verify the snapshot looks right
-ftrio.onetwo --source C:\Projects\MyApp
-
-# 4. Work through plan.md — migrate call sites at your own pace
-
-# 5. Verify everything is wired up
-ftrio.onetwo --source C:\Projects\MyApp
+// appsettings.Staging.json — overlay (only differing values needed)
+{
+  "Toggles": {
+    "NewCheckoutFlow": "50%"
+  }
+}
 ```
 
----
+With this setup, `--env Staging` resolves `NewCheckoutFlow` to `50%` and fills `SendWelcomeEmail` and `PaymentV2` from the base.
 
-## Want to leave? Eject cleanly.
-
-> **⚠️ Experimental** — `eject` is available now but has not been tested against live provider accounts. If you try this path we'd love to hear how it goes — please [open an issue](https://github.com/FtrOnOff/FtrIO.onetwo/issues) with your findings.
-
-`eject` is the reverse of `migrate` — it generates a complete exit report from FtrIO back to LaunchDarkly, Flagsmith, Microsoft.FeatureManagement, or Unleash. It can optionally create your flags in the target system with their current values before you change a line of code.
-
-```bash
-ftrio.onetwo eject --to <target> [options]
-```
-
-```bash
-# Report only — no API calls, just show what would change
-ftrio.onetwo eject --to launchdarkly --source C:\Projects\MyApp
-
-# Create flags in LaunchDarkly and write a report
-ftrio.onetwo eject --to launchdarkly \
-  --api-key sdk-xxx --project my-project --env production \
-  --source C:\Projects\MyApp --markdown eject-report.md
-
-# Flagsmith
-ftrio.onetwo eject --to flagsmith \
-  --api-key srv-xxx --project my-project \
-  --source C:\Projects\MyApp --markdown eject-report.md
-
-# Unleash
-ftrio.onetwo eject --to unleash --api-key my-token --source C:\Projects\MyApp
-
-# Microsoft.FeatureManagement — lowest friction, no API needed
-ftrio.onetwo eject --to microsoft.featuremanagement --source C:\Projects\MyApp --markdown eject-report.md
-```
-
-The report covers every toggle key found in code: its current value, the normalised key name in the target system, what code change is needed, and a ready-to-paste config snippet.
-
-**Key normalisation:**
-
-| Target | Convention | Example |
-|---|---|---|
-| `launchdarkly` | kebab-case | `SendWelcomeEmail` → `send-welcome-email` |
-| `flagsmith` | snake_case | `SendWelcomeEmail` → `send_welcome_email` |
-| `microsoft.featuremanagement` | PascalCase (unchanged) | `SendWelcomeEmail` → `SendWelcomeEmail` |
-| `unleash` | kebab-case | `SendWelcomeEmail` → `send-welcome-email` |
-
-### Microsoft.FeatureManagement is the lowest-friction exit
-
-`[FeatureGate("SendWelcomeEmail")]` is a near like-for-like replacement for `[Toggle]` — same attribute placement, same PascalCase key, no key normalisation needed. The eject report for `microsoft.featuremanagement` is a checklist of find-and-replace operations plus a config section rename from `Toggles` to `FeatureManagement`.
-
-```bash
-ftrio.onetwo eject --to microsoft.featuremanagement --source C:\Projects\MyApp --markdown eject-report.md
-```
-
-No lock-in. No trap door.
-
----
+> **Note:** FtrIO deliberately ignores `ASPNETCORE_ENVIRONMENT`, and so does this tool. Use `--env` on the command line to target a specific environment.
 
 ## Deployment safety
 
-`export-manifest` and `release-check` work together to catch missing toggle config before it reaches production.
+FtrIO.onetwo provides a two-command deployment gate that ensures your production config always has an entry for every toggle your code uses — before you deploy, not after.
 
-### How it works
+### `ftrio.onetwo export-manifest`
 
-**In your app's CI pipeline** (on every push):
+Scans your source tree and writes a JSON manifest of every toggle key the codebase references, with its source type, file path, and line number. Run this in your app's CI pipeline on every push.
 
 ```bash
 ftrio.onetwo export-manifest --source ./src --output toggles.manifest.json
 ```
 
-This writes a JSON snapshot of every toggle key the codebase references. The manifest is uploaded as a build artifact.
+```json
+{
+  "generatedAt": "2026-06-21T16:00:00Z",
+  "toggles": [
+    { "key": "SendWelcomeEmail", "source": "[Toggle]", "file": "Services/EmailService.cs", "line": 17 },
+    { "key": "PaymentV2", "source": "[ToggleAsync]", "file": "Services/PaymentService.cs", "line": 88 }
+  ]
+}
+```
 
-**In your deployment pipeline** (before deploying):
+| Argument | Description |
+|---|---|
+| `--source <path>` | Directory to scan for `.cs` files. Defaults to current directory. |
+| `--output <file>` | Path to write the manifest. Defaults to `toggles.manifest.json`. |
+| `--pretty` | Pretty-print the JSON output (default: true). |
+
+**Exit codes:** `0` success, `1` source not found or no `.cs` files, `2` write failure
+
+---
+
+### `ftrio.onetwo release-check`
+
+Reads a manifest and validates every key is present in a target `appsettings.json` — either a local file or a remote URL. Blocks the release if anything is missing.
 
 ```bash
 ftrio.onetwo release-check \
@@ -221,26 +234,61 @@ ftrio.onetwo release-check \
   --markdown release-check-report.md
 ```
 
-This validates every key in the manifest is present in the target config. If anything is missing the check fails, shows exactly where each missing key is used in code, and prints a ready-to-paste JSON block of suggested additions.
-
 ```
+FtrIO release check: Production
+Manifest:  toggles.manifest.json (2 toggles)
+Config:    appsettings.Production.json
+
 ✅  SendWelcomeEmail    present   true
 ❌  PaymentV2           MISSING
     Used at:    Services\PaymentService.cs:88
+    Risk:       Toggle key not in config — will be treated as OFF at runtime
     Suggested:  "PaymentV2": "false"
 
+── Add to appsettings.json ──────────────────────────
+{
+  "Toggles": {
+    "PaymentV2": "false"
+  }
+}
+
+── Summary ──────────────────────────────────────────
+1 present ✅   1 missing ❌
 Release to Production is BLOCKED.
 ```
 
+| Argument | Description |
+|---|---|
+| `--manifest <file>` | Path to the manifest JSON. Required. |
+| `--config <file>` | Path to a local `appsettings.json` to validate against. |
+| `--config-url <url>` | URL to fetch the target config from. Mutually exclusive with `--config`. |
+| `--env-name <name>` | Display name for the environment in the report. Defaults to the config filename. |
+| `--markdown <file>` | Write the full report to a markdown file. |
+| `--fail-on-missing` | Exit code 1 if any keys are missing (default: true). |
+| `--warn-only` | Always exit 0 but emit warnings for missing keys. |
+
+**Exit codes:** `0` all present, `1` keys missing, `2` manifest not found/invalid, `3` config unreachable
+
+---
+
 ### GitHub Actions
 
+Two companion actions are available to wire this into your pipelines.
+
+**Step 1 — in your app's CI pipeline:**
+
 ```yaml
-# App CI pipeline
 - uses: FtrOnOff/export-manifest-action@v1
   with:
     source: ./src
+    output: toggles.manifest.json
+```
 
-# Deployment pipeline
+The manifest is uploaded as a build artifact and retained for 30 days.
+
+**Step 2 — in your deployment pipeline:**
+
+```yaml
 - uses: FtrOnOff/release-check-action@v1
   with:
     artifact-name: toggle-manifest
@@ -250,134 +298,40 @@ Release to Production is BLOCKED.
     fail-on-missing: true
 ```
 
-Declare `needs: release-check` on your deploy job to block it automatically if the check fails.
+Missing keys emit warning annotations in the Actions UI and a single error summary when the check fails. The `deploy` job should declare `needs: release-check` so it is blocked automatically if the check fails.
 
----
+**Full deployment pipeline:**
 
-## Reference
+```yaml
+name: Deploy to Production
+on:
+  release:
+    types: [published]
 
-### `ftrio.onetwo` — audit
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: FtrOnOff/release-check-action@v1
+        with:
+          artifact-name: toggle-manifest
+          config-url: ${{ secrets.PRODUCTION_CONFIG_URL }}
+          config-auth-header: ${{ secrets.PRODUCTION_CONFIG_AUTH }}
+          env-name: Production
+          fail-on-missing: true
+          markdown: release-check-report.md
 
+  deploy:
+    needs: release-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        run: echo "deploying..."
 ```
-ftrio.onetwo [--source <path>] [--config <path>] [--env <name>] [--markdown <file>]
-```
 
-| Argument | Description |
-|---|---|
-| `--source` | Directory to scan for toggle usage in `.cs` files. Defaults to current directory. |
-| `--config` | Directory to search for `appsettings*.json` files. Defaults to `--source`. |
-| `--env` | Show a single environment using the base+overlay model (e.g. `--env Staging`). |
-| `--markdown` | Also write the results to a markdown file. |
-
-Both `--source` and `--config` can be passed as positional arguments.
-
-**Toggle states:**
-
-| State | Meaning |
-|---|---|
-| `ON` | `true` or `1` in `appsettings.json` |
-| `OFF` | `false` or `0` in `appsettings.json` |
-| `20%` | Percentage rollout — raw value shown directly |
-| `BLUE` / `GREEN` | Blue-green deployment slot |
-| `MISSING` | Used in code but not present in any config file |
-
-**Detected patterns:** `[Toggle]`, `[ToggleAsync]`, `ExecuteMethodIfToggleOn`, `ExecuteMethodIfToggleOnAsync`
-
-> FtrIO deliberately ignores `ASPNETCORE_ENVIRONMENT`. Use `--env` on the command line to target a specific environment.
+Combined with the Roslyn-based toggle scanner (audit-time) and FtrIO itself (runtime), this catches missing toggle config at every stage of the pipeline.
 
 ---
-
-### `ftrio.onetwo import`
-
-| Argument | Description |
-|---|---|
-| `--source` | Source type: `launchdarkly`, `flagsmith`, `unleash`, `microsoft.featuremanagement`, `flagd`, `env`, `http` |
-| `--api-key` | Auth key for LaunchDarkly, Flagsmith, or Unleash |
-| `--project` | LaunchDarkly project key |
-| `--env` | Environment name |
-| `--file` | Local file for `flagd` or `microsoft.featuremanagement` source |
-| `--url` | Base URL for `unleash` source, or endpoint URL for `http` source |
-| `--prefix` | Prefix to strip for `env` source (e.g. `FEATURE_`) |
-| `--config` | Path to `appsettings.json` to write. Defaults to `appsettings.json` in current directory. |
-| `--dry-run` | Print what would change without writing |
-| `--overwrite` | Replace the entire `Toggles` section (default: merge) |
-| `--sync` | Run continuously, polling every `--interval` seconds |
-| `--interval` | Poll interval in seconds (default: 30) |
-| `--markdown` | Write a markdown summary |
-| `--fail-on-warnings` | Exit code 3 if any flags were approximated |
-
-**Exit codes:** `0` success, `1` source unreachable, `2` write failure, `3` warnings (with `--fail-on-warnings`)
-
----
-
-### `ftrio.onetwo migrate`
-
-| Argument | Description |
-|---|---|
-| `--from` | SDK to scan for: `launchdarkly`, `flagsmith`, `unleash`, `microsoft.featuremanagement` |
-| `--source` | Directory to scan for `.cs` files |
-| `--api-key` | Optional — fetches live flag state. Not needed for `microsoft.featuremanagement`. |
-| `--project` | LaunchDarkly project key |
-| `--env` | Environment name |
-| `--url` | Unleash server base URL (e.g. `https://unleash.example.com`) |
-| `--config` | Config file for `microsoft.featuremanagement` flag values |
-| `--exclude` | Comma-separated flag keys to exclude |
-| `--markdown` | Write the full report to a markdown file |
-| `--fail-on-unsupported` | Exit code 1 if any flags cannot be migrated |
-
----
-
-### `ftrio.onetwo eject`
-
-| Argument | Description |
-|---|---|
-| `--to` | Target system: `launchdarkly`, `flagsmith`, `microsoft.featuremanagement`, `unleash` |
-| `--source` | Directory to scan for `.cs` files. Defaults to current directory. |
-| `--config` | Path to `appsettings.json`. Defaults to `appsettings.json` in `--source`. |
-| `--api-key` | API key for the target. If omitted, report only — no flags created. |
-| `--project` | Project key (required for LaunchDarkly and Flagsmith with `--api-key`) |
-| `--env` | Environment to create flags in (required for LaunchDarkly with `--api-key`) |
-| `--exclude` | Comma-separated toggle keys to exclude |
-| `--markdown` | Write the full report to a markdown file |
-| `--dry-run` | Show what would be created without making any API calls |
-
-**Exit codes:** `0` all flags created cleanly, `1` flags missing or failed, `2` source/config not found, `3` API unreachable
-
----
-
-### `ftrio.onetwo export-manifest`
-
-| Argument | Description |
-|---|---|
-| `--source` | Directory to scan. Defaults to current directory. |
-| `--output` | Output file. Defaults to `toggles.manifest.json`. |
-| `--pretty` | Pretty-print JSON (default: true) |
-
-**Exit codes:** `0` success, `1` source not found or no `.cs` files, `2` write failure
-
----
-
-### `ftrio.onetwo release-check`
-
-| Argument | Description |
-|---|---|
-| `--manifest` | Path to the manifest JSON. Required. |
-| `--config` | Path to a local `appsettings.json` to validate against. |
-| `--config-url` | URL to fetch the target config from. Mutually exclusive with `--config`. |
-| `--env-name` | Display name for the environment in the report. |
-| `--markdown` | Write the full report to a markdown file. |
-| `--fail-on-missing` | Exit code 1 if any keys are missing (default: true). |
-| `--warn-only` | Always exit 0 but emit warnings for missing keys. |
-
-**Exit codes:** `0` all present, `1` keys missing, `2` manifest not found/invalid, `3` config unreachable
-
----
-
-## The FtrIO ecosystem
-
-- [**FtrIO**](https://github.com/FtrOnOff/FtrIO) — the core library. Weaves `[Toggle]` into your IL at compile time, reads state from `appsettings.json` at runtime.
-- [**FtrIO.Toaster**](https://github.com/FtrOnOff/FtrIO.Toaster) — a lightweight web UI for managing toggles live without editing files or restarting.
-- [**FtrIO.onetwo**](https://github.com/FtrOnOff/FtrIO.onetwo) — this tool.
 
 ## Building from source
 
@@ -385,4 +339,9 @@ Both `--source` and `--config` can be passed as positional arguments.
 cd FtrIO.onetwo
 dotnet build
 dotnet run -- --source <path>
+dotnet run -- --source <source-path> --config <config-path>
 ```
+
+## Related
+
+- [FtrIO](https://github.com/FtrOnOff/FtrIO) — the feature toggle library this tool supplements
