@@ -189,6 +189,149 @@ With this setup, `--env Staging` resolves `NewCheckoutFlow` to `50%` and fills `
 
 > **Note:** FtrIO deliberately ignores `ASPNETCORE_ENVIRONMENT`, and so does this tool. Use `--env` on the command line to target a specific environment.
 
+## Deployment safety
+
+FtrIO.onetwo provides a two-command deployment gate that ensures your production config always has an entry for every toggle your code uses — before you deploy, not after.
+
+### `ftrio.onetwo export-manifest`
+
+Scans your source tree and writes a JSON manifest of every toggle key the codebase references, with its source type, file path, and line number. Run this in your app's CI pipeline on every push.
+
+```bash
+ftrio.onetwo export-manifest --source ./src --output toggles.manifest.json
+```
+
+```json
+{
+  "generatedAt": "2026-06-21T16:00:00Z",
+  "toggles": [
+    { "key": "SendWelcomeEmail", "source": "[Toggle]", "file": "Services/EmailService.cs", "line": 17 },
+    { "key": "PaymentV2", "source": "[ToggleAsync]", "file": "Services/PaymentService.cs", "line": 88 }
+  ]
+}
+```
+
+| Argument | Description |
+|---|---|
+| `--source <path>` | Directory to scan for `.cs` files. Defaults to current directory. |
+| `--output <file>` | Path to write the manifest. Defaults to `toggles.manifest.json`. |
+| `--pretty` | Pretty-print the JSON output (default: true). |
+
+**Exit codes:** `0` success, `1` source not found or no `.cs` files, `2` write failure
+
+---
+
+### `ftrio.onetwo release-check`
+
+Reads a manifest and validates every key is present in a target `appsettings.json` — either a local file or a remote URL. Blocks the release if anything is missing.
+
+```bash
+ftrio.onetwo release-check \
+  --manifest toggles.manifest.json \
+  --config appsettings.Production.json \
+  --env-name Production \
+  --markdown release-check-report.md
+```
+
+```
+FtrIO release check: Production
+Manifest:  toggles.manifest.json (2 toggles)
+Config:    appsettings.Production.json
+
+✅  SendWelcomeEmail    present   true
+❌  PaymentV2           MISSING
+    Used at:    Services\PaymentService.cs:88
+    Risk:       Toggle key not in config — will be treated as OFF at runtime
+    Suggested:  "PaymentV2": "false"
+
+── Add to appsettings.json ──────────────────────────
+{
+  "Toggles": {
+    "PaymentV2": "false"
+  }
+}
+
+── Summary ──────────────────────────────────────────
+1 present ✅   1 missing ❌
+Release to Production is BLOCKED.
+```
+
+| Argument | Description |
+|---|---|
+| `--manifest <file>` | Path to the manifest JSON. Required. |
+| `--config <file>` | Path to a local `appsettings.json` to validate against. |
+| `--config-url <url>` | URL to fetch the target config from. Mutually exclusive with `--config`. |
+| `--env-name <name>` | Display name for the environment in the report. Defaults to the config filename. |
+| `--markdown <file>` | Write the full report to a markdown file. |
+| `--fail-on-missing` | Exit code 1 if any keys are missing (default: true). |
+| `--warn-only` | Always exit 0 but emit warnings for missing keys. |
+
+**Exit codes:** `0` all present, `1` keys missing, `2` manifest not found/invalid, `3` config unreachable
+
+---
+
+### GitHub Actions
+
+Two companion actions are available to wire this into your pipelines.
+
+**Step 1 — in your app's CI pipeline:**
+
+```yaml
+- uses: FtrOnOff/export-manifest-action@v1
+  with:
+    source: ./src
+    output: toggles.manifest.json
+```
+
+The manifest is uploaded as a build artifact and retained for 30 days.
+
+**Step 2 — in your deployment pipeline:**
+
+```yaml
+- uses: FtrOnOff/release-check-action@v1
+  with:
+    artifact-name: toggle-manifest
+    config-url: ${{ secrets.PRODUCTION_CONFIG_URL }}
+    config-auth-header: ${{ secrets.PRODUCTION_CONFIG_AUTH }}
+    env-name: Production
+    fail-on-missing: true
+```
+
+Missing keys emit warning annotations in the Actions UI and a single error summary when the check fails. The `deploy` job should declare `needs: release-check` so it is blocked automatically if the check fails.
+
+**Full deployment pipeline:**
+
+```yaml
+name: Deploy to Production
+on:
+  release:
+    types: [published]
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: FtrOnOff/release-check-action@v1
+        with:
+          artifact-name: toggle-manifest
+          config-url: ${{ secrets.PRODUCTION_CONFIG_URL }}
+          config-auth-header: ${{ secrets.PRODUCTION_CONFIG_AUTH }}
+          env-name: Production
+          fail-on-missing: true
+          markdown: release-check-report.md
+
+  deploy:
+    needs: release-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        run: echo "deploying..."
+```
+
+Combined with the Roslyn-based toggle scanner (audit-time) and FtrIO itself (runtime), this catches missing toggle config at every stage of the pipeline.
+
+---
+
 ## Building from source
 
 ```bash
